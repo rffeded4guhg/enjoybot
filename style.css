@@ -1,0 +1,57 @@
+body {
+  margin: 0;
+  font-family: 'Fredoka One', cursive;
+  background: linear-gradient(to right, #fce3ec, #d4fcf9);
+  overflow-x: hidden;
+}
+header {
+  text-align: center;
+  background: #fff;
+  padding: 20px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+header img {
+  max-width: 90%;
+  height: auto;
+  border-radius: 15px;
+}
+.section {
+  padding: 30px;
+  text-align: center;
+}
+.section h2 {
+  color: #ff4c98;
+  font-size: 2rem;
+}
+.info, .guests {
+  background: #fff;
+  border-radius: 15px;
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 600px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+.guests ul {
+  list-style: none;
+  padding: 0;
+}
+.guests li {
+  margin: 5px 0;
+  color: #333;
+}
+.timer {
+  font-size: 1.5rem;
+  margin-top: 10px;
+  color: #4b0082;
+}
+footer {
+  margin-top: 40px;
+  text-align: center;
+  padding: 10px;
+  font-size: 1rem;
+}
+video, img.animated {
+  margin-top: 20px;
+  max-width: 80%;
+  border-radius: 12px;
+}
