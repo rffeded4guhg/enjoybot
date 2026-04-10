@@ -12,14 +12,13 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 BOT_API_URL = os.getenv("BOT_API_URL")
-SECRET_KEY = os.getenv("SECRET_KEY")
+API_SECRET = os.getenv("API_SECRET")
 
-app.secret_key = SECRET_KEY
+app.secret_key = os.getenv("SECRET_KEY")
 
-# TEMP STORAGE (replace with DB later)
+# TEMP STORAGE (use DB later)
 user_claims = {}
 
-# HOME
 @app.route("/")
 def home():
     return "Backend Running"
@@ -73,21 +72,21 @@ def callback():
 @app.route("/claim", methods=["POST"])
 def claim():
     if "user_id" not in session:
-        return jsonify({"message": "Not logged in"}), 401
+        return jsonify({"message": "❌ Not logged in"}), 401
 
     user_id = session["user_id"]
     today = str(datetime.date.today())
 
     if user_claims.get(user_id) == today:
-        return jsonify({"message": "Already claimed today"})
+        return jsonify({"message": "❌ Already claimed today"})
 
     user_claims[user_id] = today
 
-    # Call bot
+    # CALL BOT
     requests.post(
         BOT_API_URL,
         json={"user_id": user_id},
-        headers={"Authorization": os.getenv("API_SECRET")}
+        headers={"Authorization": API_SECRET}
     )
 
     return jsonify({"message": "✅ Daily claimed successfully!"})
