@@ -83,7 +83,7 @@ def callback():
     session["username"] = user_res["username"]
 
     # Redirect back to your website
-    return redirect("https://your-website-url.com")
+    return redirect("https://enjoybot.hostedbyfps.com/")
 
 # ================= CLAIM DAILY =================
 @app.route("/claim", methods=["POST"])
