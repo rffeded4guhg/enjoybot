@@ -1,36 +1,30 @@
 import os
-from flask import Flask, redirect, request, session, jsonify
+from flask import Flask, redirect, request, jsonify
 import requests
 import datetime
-from flask_cors import CORS
+import jwt
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
 
-# ================= ENV VARIABLES =================
+# ================= CONFIG =================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 BOT_API_URL = os.getenv("BOT_API_URL")
 API_SECRET = os.getenv("API_SECRET")
+JWT_SECRET = os.getenv("SECRET_KEY")
 
-app.secret_key = os.getenv("SECRET_KEY", "fallback_secret")
-
-# ================= TEMP STORAGE =================
-# NOTE: resets when server restarts (use DB later)
+# TEMP STORAGE (use DB later)
 user_claims = {}
 
-# ================= HOME ROUTE =================
+# ================= HOME =================
 @app.route("/")
 def home():
     return "Backend Running ✅"
 
-# ================= LOGIN ROUTE =================
+# ================= LOGIN =================
 @app.route("/login")
 def login():
-    if not CLIENT_ID or not REDIRECT_URI:
-        return "❌ Missing CLIENT_ID or REDIRECT_URI", 500
-
     discord_url = (
         f"https://discord.com/api/oauth2/authorize"
         f"?client_id={CLIENT_ID}"
@@ -45,9 +39,6 @@ def login():
 def callback():
     code = request.args.get("code")
 
-    if not code:
-        return "❌ No code provided", 400
-
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -56,9 +47,7 @@ def callback():
         "redirect_uri": REDIRECT_URI,
     }
 
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     token_res = requests.post(
         "https://discord.com/api/oauth2/token",
@@ -68,61 +57,72 @@ def callback():
 
     access_token = token_res.get("access_token")
 
-    if not access_token:
-        return "❌ Failed to get access token", 400
-
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
     ).json()
 
-    if "id" not in user_res:
-        return "❌ Failed to fetch user", 400
+    user_id = user_res["id"]
+    username = user_res["username"]
 
-    session["user_id"] = user_res["id"]
-    session["username"] = user_res["username"]
+    # 🔥 CREATE JWT TOKEN
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
+    }
 
-    # Redirect back to your website
-    return redirect("https://enjoybot.hostedbyfps.com/")
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-# ================= CLAIM DAILY =================
+    # 🔥 REDIRECT WITH TOKEN
+    return redirect(f"https://enjoybot.hostedbyfps.com/?token={token}")
+
+# ================= CLAIM =================
 @app.route("/claim", methods=["POST"])
 def claim():
-    if "user_id" not in session:
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header:
         return jsonify({"message": "❌ Not logged in"}), 401
 
-    user_id = session["user_id"]
+    try:
+        token = auth_header.split(" ")[1]
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except:
+        return jsonify({"message": "❌ Invalid token"}), 401
+
+    user_id = data["user_id"]
     today = str(datetime.date.today())
 
-    # Check if already claimed
     if user_claims.get(user_id) == today:
         return jsonify({"message": "❌ Already claimed today"})
 
     user_claims[user_id] = today
 
-    # Send request to bot
-    try:
-        requests.post(
-            BOT_API_URL,
-            json={"user_id": user_id},
-            headers={"Authorization": API_SECRET},
-            timeout=5
-        )
-    except Exception as e:
-        return jsonify({"message": f"❌ Bot error: {str(e)}"}), 500
+    # CALL BOT
+    requests.post(
+        BOT_API_URL,
+        json={"user_id": user_id},
+        headers={"Authorization": API_SECRET}
+    )
 
     return jsonify({"message": "✅ Daily claimed successfully!"})
 
-# ================= DEBUG ROUTE =================
+# ================= USER INFO =================
 @app.route("/me")
 def me():
-    if "user_id" in session:
-        return jsonify({
-            "user_id": session["user_id"],
-            "username": session["username"]
-        })
-    return jsonify({"message": "Not logged in"})
+    auth_header = request.headers.get("Authorization")
 
-# ================= RUN APP =================
+    if not auth_header:
+        return jsonify({"message": "Not logged in"})
+
+    try:
+        token = auth_header.split(" ")[1]
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return jsonify(data)
+    except:
+        return jsonify({"message": "Invalid token"})
+
+# ================= RUN =================
 if __name__ == "__main__":
     app.run()
