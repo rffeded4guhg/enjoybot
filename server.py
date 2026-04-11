@@ -3,8 +3,10 @@ from flask import Flask, redirect, request, jsonify
 import requests
 import datetime
 import jwt
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # ================= CONFIG =================
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -14,7 +16,7 @@ BOT_API_URL = os.getenv("BOT_API_URL")
 API_SECRET = os.getenv("API_SECRET")
 JWT_SECRET = os.getenv("SECRET_KEY")
 
-# TEMP STORAGE (use DB later)
+# TEMP STORAGE (replace with DB later)
 user_claims = {}
 
 # ================= HOME =================
@@ -39,6 +41,10 @@ def login():
 def callback():
     code = request.args.get("code")
 
+    if not code:
+        return "❌ No code provided", 400
+
+    # Exchange code for token
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -57,6 +63,10 @@ def callback():
 
     access_token = token_res.get("access_token")
 
+    if not access_token:
+        return "❌ Failed to get access token", 400
+
+    # Get user info
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
@@ -64,20 +74,28 @@ def callback():
 
     user_id = user_res["id"]
     username = user_res["username"]
+    avatar = user_res["avatar"]
 
-    # 🔥 CREATE JWT TOKEN
+    # Avatar URL
+    if avatar:
+        avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.png"
+    else:
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
+
+    # Create JWT token
     payload = {
         "user_id": user_id,
         "username": username,
+        "avatar": avatar_url,
         "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
     }
 
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-    # 🔥 REDIRECT WITH TOKEN
+    # Redirect to frontend with token
     return redirect(f"https://enjoybot.hostedbyfps.com/?token={token}")
 
-# ================= CLAIM =================
+# ================= CLAIM DAILY =================
 @app.route("/claim", methods=["POST"])
 def claim():
     auth_header = request.headers.get("Authorization")
@@ -99,16 +117,32 @@ def claim():
 
     user_claims[user_id] = today
 
-    # CALL BOT
-    requests.post(
-        BOT_API_URL,
-        json={"user_id": user_id},
-        headers={"Authorization": API_SECRET}
-    )
+    # Call bot API
+    try:
+        requests.post(
+            BOT_API_URL,
+            json={"user_id": user_id},
+            headers={"Authorization": API_SECRET},
+            timeout=5
+        )
+    except Exception as e:
+        return jsonify({"message": f"❌ Bot error: {str(e)}"}), 500
 
     return jsonify({"message": "✅ Daily claimed successfully!"})
 
-# ================= USER INFO =================
+# ================= PROFILE API =================
+@app.route("/profile/<user_id>")
+def profile(user_id):
+    # Dummy data (replace with DB later)
+    return jsonify({
+        "user_id": user_id,
+        "username": "User",
+        "avatar": "https://cdn.discordapp.com/embed/avatars/0.png",
+        "coins": 100,
+        "streak": 1
+    })
+
+# ================= CURRENT USER =================
 @app.route("/me")
 def me():
     auth_header = request.headers.get("Authorization")
