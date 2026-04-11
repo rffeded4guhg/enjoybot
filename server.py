@@ -1,4 +1,5 @@
 import os
+import psycopg2
 from flask import Flask, redirect, request, jsonify
 import requests
 import datetime
@@ -12,12 +13,32 @@ CORS(app)
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
-BOT_API_URL = os.getenv("BOT_API_URL")
-API_SECRET = os.getenv("API_SECRET")
 JWT_SECRET = os.getenv("SECRET_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# TEMP STORAGE (replace with DB later)
-user_claims = {}
+# ================= DATABASE =================
+conn = psycopg2.connect(DATABASE_URL)
+cursor = conn.cursor()
+
+# Create tables
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY,
+    last_claim DATE,
+    streak INT DEFAULT 0,
+    coins INT DEFAULT 0
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS claims (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT,
+    status TEXT
+)
+""")
+
+conn.commit()
 
 # ================= HOME =================
 @app.route("/")
@@ -44,7 +65,6 @@ def callback():
     if not code:
         return "❌ No code provided", 400
 
-    # Exchange code for token
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -66,7 +86,6 @@ def callback():
     if not access_token:
         return "❌ Failed to get access token", 400
 
-    # Get user info
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
@@ -76,13 +95,18 @@ def callback():
     username = user_res["username"]
     avatar = user_res["avatar"]
 
-    # Avatar URL
     if avatar:
         avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.png"
     else:
         avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
 
-    # Create JWT token
+    # Ensure user exists in DB
+    cursor.execute(
+        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+        (user_id,)
+    )
+    conn.commit()
+
     payload = {
         "user_id": user_id,
         "username": username,
@@ -92,10 +116,9 @@ def callback():
 
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-    # Redirect to frontend with token
     return redirect(f"https://enjoybot.hostedbyfps.com/?token={token}")
 
-# ================= CLAIM DAILY =================
+# ================= CLAIM =================
 @app.route("/claim", methods=["POST"])
 def claim():
     auth_header = request.headers.get("Authorization")
@@ -110,36 +133,47 @@ def claim():
         return jsonify({"message": "❌ Invalid token"}), 401
 
     user_id = data["user_id"]
-    today = str(datetime.date.today())
 
-    if user_claims.get(user_id) == today:
+    # Check if already claimed today
+    today = datetime.date.today()
+    cursor.execute(
+        "SELECT last_claim FROM users WHERE user_id=%s",
+        (user_id,)
+    )
+    result = cursor.fetchone()
+
+    if result and result[0] == today:
         return jsonify({"message": "❌ Already claimed today"})
 
-    user_claims[user_id] = today
+    # Store claim request (bot will process)
+    cursor.execute(
+        "INSERT INTO claims (user_id, status) VALUES (%s, %s)",
+        (user_id, "pending")
+    )
+    conn.commit()
 
-    # Call bot API
-    try:
-        requests.post(
-            BOT_API_URL,
-            json={"user_id": user_id},
-            headers={"Authorization": API_SECRET},
-            timeout=5
-        )
-    except Exception as e:
-        return jsonify({"message": f"❌ Bot error: {str(e)}"}), 500
+    return jsonify({"message": "✅ Claim request sent!"})
 
-    return jsonify({"message": "✅ Daily claimed successfully!"})
-
-# ================= PROFILE API =================
+# ================= PROFILE =================
 @app.route("/profile/<user_id>")
 def profile(user_id):
-    # Dummy data (replace with DB later)
+    cursor.execute(
+        "SELECT coins, streak FROM users WHERE user_id=%s",
+        (user_id,)
+    )
+    data = cursor.fetchone()
+
+    if not data:
+        return jsonify({
+            "user_id": user_id,
+            "coins": 0,
+            "streak": 0
+        })
+
     return jsonify({
         "user_id": user_id,
-        "username": "User",
-        "avatar": "https://cdn.discordapp.com/embed/avatars/0.png",
-        "coins": 100,
-        "streak": 1
+        "coins": data[0],
+        "streak": data[1]
     })
 
 # ================= CURRENT USER =================
